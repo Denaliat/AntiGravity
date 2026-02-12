@@ -1,21 +1,26 @@
-import { prisma } from './prisma';
+import { supabase } from './supabase';
 import { User, ParcelDelivery, ProofOfDelivery, TrackingEvent, AuditEvent, Ride, ChangeRequest } from './types';
 
 export * from './types';
 
-// Helper to map Prisma Parcel to App Parcel type
+// Helper to map Supabase Parcel to App Parcel type
 const mapParcel = (p: any): ParcelDelivery => {
     if (!p) return null as any;
+    // Map PostgREST relation responses (usually capitalized table names) to App props
+    // Note: If schema uses explicit relation names, PostgREST might use those. Assuming Table Names for now.
+    const events = p.TrackingEvent || p.events || [];
+    const proof = p.ProofOfDelivery || p.proof || (Object.keys(p).includes('ProofOfDelivery') ? p.ProofOfDelivery : undefined);
+
     return {
         ...p,
         deliveryId: p.id,
-        trackingEvents: p.trackingEvents || [],
-        proofOfDelivery: p.proof ? { ...p.proof, proofId: p.proof.id } : undefined,
-        auditLog: [] // Prisma schema calls it AuditEvent but relations are tricky, we'll skip for now or fetch separately
+        trackingEvents: events,
+        proofOfDelivery: proof ? { ...proof, proofId: proof.id } : undefined,
+        auditLog: [] // Implement AuditEvent fetching if needed
     };
 };
 
-// Helper to map Prisma Ride to App Ride type
+// Helper to map Supabase Ride to App Ride type
 const mapRide = (r: any): Ride => {
     if (!r) return null as any;
     return {
@@ -26,91 +31,137 @@ const mapRide = (r: any): Ride => {
 
 export const db = {
     users: {
-        findById: async (id: string) => prisma.user.findUnique({ where: { id } }) as Promise<User | null>,
-        findByEmail: async (email: string) => prisma.user.findUnique({ where: { email } }) as Promise<User | null>,
-        findByReferralCode: async (code: string) => prisma.user.findUnique({ where: { referralCode: code } }) as Promise<User | null>,
-        create: async (user: User) => prisma.user.create({ data: { ...user, permissions: user.permissions || [] } }) as Promise<User>,
-        update: async (id: string, data: Partial<User>) => prisma.user.update({ where: { id }, data: data as any }) as Promise<User>,
+        findById: async (id: string) => {
+            const { data } = await supabase.from('User').select('*').eq('id', id).single();
+            return data as User | null;
+        },
+        findByEmail: async (email: string) => {
+            const { data } = await supabase.from('User').select('*').eq('email', email).single();
+            return data as User | null;
+        },
+        findByReferralCode: async (code: string) => {
+            const { data } = await supabase.from('User').select('*').eq('referralCode', code).single();
+            return data as User | null;
+        },
+        create: async (user: User) => {
+            const { data, error } = await supabase.from('User').insert({
+                ...user,
+                permissions: user.permissions || []
+            }).select().single();
+            if (error) throw error;
+            return data as User;
+        },
+        update: async (id: string, updates: Partial<User>) => {
+            const { data, error } = await supabase.from('User').update(updates).eq('id', id).select().single();
+            if (error) throw error;
+            return data as User;
+        },
     },
     bookings: {
         create: async (booking: ParcelDelivery) => {
             const { deliveryId, trackingEvents, auditLog, proofOfDelivery, ...rest } = booking;
-            // Map App type back to Prisma inputs
-            const res = await prisma.parcelDelivery.create({
-                data: {
-                    ...rest,
-                    trackingEvents: { create: [] }
-                },
-                include: { trackingEvents: true, proof: true }
-            });
-            return mapParcel(res);
+            // Supabase insert
+            const { data, error } = await supabase.from('ParcelDelivery').insert({
+                ...rest,
+                // Status defaults to BOOKED if not provided
+            }).select('*, TrackingEvent(*), ProofOfDelivery(*)').single();
+
+            if (error) throw error;
+            return mapParcel(data);
         },
         findById: async (id: string) => {
-            const res = await prisma.parcelDelivery.findUnique({
-                where: { id },
-                include: { trackingEvents: true, proof: true }
-            });
-            return mapParcel(res);
+            const { data } = await supabase.from('ParcelDelivery')
+                .select('*, TrackingEvent(*), ProofOfDelivery(*)')
+                .eq('id', id)
+                .single();
+            return mapParcel(data);
         },
         findByTrackingId: async (tid: string) => {
-            const res = await prisma.parcelDelivery.findUnique({
-                where: { trackingId: tid },
-                include: { trackingEvents: true, proof: true }
-            });
-            return mapParcel(res);
+            const { data } = await supabase.from('ParcelDelivery')
+                .select('*, TrackingEvent(*), ProofOfDelivery(*)')
+                .eq('trackingId', tid)
+                .single();
+            return mapParcel(data);
         },
         updateStatus: async (id: string, status: any, event: any) => {
-            const { eventId, ...eventData } = event; // remove ID to let db gen it or map it
-            const res = await prisma.parcelDelivery.update({
-                where: { id },
-                data: {
-                    status,
-                    trackingEvents: { create: eventData }
-                },
-                include: { trackingEvents: true, proof: true }
+            // Update status
+            const { error: updateError } = await supabase.from('ParcelDelivery').update({ status }).eq('id', id);
+            if (updateError) throw updateError;
+
+            // Create tracking event
+            const { eventId, ...eventData } = event;
+            const { error: eventError } = await supabase.from('TrackingEvent').insert({
+                ...eventData,
+                deliveryId: id
             });
-            return mapParcel(res);
+            if (eventError) throw eventError;
+
+            // Return updated parcel
+            const { data } = await supabase.from('ParcelDelivery')
+                .select('*, TrackingEvent(*), ProofOfDelivery(*)')
+                .eq('id', id)
+                .single();
+            return mapParcel(data);
         }
     },
     proofs: {
         create: async (proof: ProofOfDelivery) => {
             const { proofId, ...rest } = proof;
-            const res = await prisma.proofOfDelivery.create({ data: rest });
-            return { ...res, proofId: res.id };
+            const { data, error } = await supabase.from('ProofOfDelivery').insert(rest).select().single();
+            if (error) throw error;
+            return { ...data, proofId: data.id };
         },
         findByDeliveryId: async (deliveryId: string) => {
-            const res = await prisma.proofOfDelivery.findUnique({ where: { deliveryId } });
-            return res ? { ...res, proofId: res.id } : null;
+            const { data } = await supabase.from('ProofOfDelivery').select('*').eq('deliveryId', deliveryId).single();
+            return data ? { ...data, proofId: data.id } : null;
         }
     },
     changeRequests: {
-        create: async (req: ChangeRequest) => prisma.changeRequest.create({ data: req }),
-        findAll: async () => prisma.changeRequest.findMany(),
-        updateStatus: async (id: string, status: any, reviewerId: string) => prisma.changeRequest.update({
-            where: { id },
-            data: { status, reviewedBy: reviewerId }
-        })
+        create: async (req: ChangeRequest) => {
+            const { data, error } = await supabase.from('ChangeRequest').insert(req).select().single();
+            if (error) throw error;
+            return data;
+        },
+        findAll: async () => {
+            const { data } = await supabase.from('ChangeRequest').select('*');
+            return data || [];
+        },
+        updateStatus: async (id: string, status: any, reviewerId: string) => {
+            const { data, error } = await supabase.from('ChangeRequest')
+                .update({ status, reviewedBy: reviewerId })
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data;
+        }
     },
     rides: {
         create: async (ride: Ride) => {
             const { rideId, ...rest } = ride;
-            const res = await prisma.ride.create({ data: rest });
-            return mapRide(res);
+            const { data, error } = await supabase.from('Ride').insert(rest).select().single();
+            if (error) throw error;
+            return mapRide(data);
         },
         findAll: async (status?: string) => {
-            const res = await prisma.ride.findMany({ where: status ? { status: status as any } : undefined });
-            return res.map(mapRide);
+            let query = supabase.from('Ride').select('*');
+            if (status) {
+                query = query.eq('status', status);
+            }
+            const { data } = await query;
+            return (data || []).map(mapRide);
         },
         findById: async (id: string) => {
-            const res = await prisma.ride.findUnique({ where: { id } });
-            return mapRide(res);
+            const { data } = await supabase.from('Ride').select('*').eq('id', id).single();
+            return mapRide(data);
         },
         updateStatus: async (id: string, status: any, driverId?: string) => {
-            const res = await prisma.ride.update({
-                where: { id },
-                data: { status, driverId }
-            });
-            return mapRide(res);
+            const updates: any = { status };
+            if (driverId !== undefined) updates.driverId = driverId;
+
+            const { data, error } = await supabase.from('Ride').update(updates).eq('id', id).select().single();
+            if (error) throw error;
+            return mapRide(data);
         }
     }
 };

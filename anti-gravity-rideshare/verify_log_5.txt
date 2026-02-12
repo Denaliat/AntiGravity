@@ -1,0 +1,35 @@
+Connecting to database...
+Connection failed: PrismaClientKnownRequestError: 
+Invalid `prisma.user.count()` invocation in
+C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\verify-prisma.ts:7:41
+
+  4 try {
+  5     console.log('Connecting to database...');
+  6     // Try to count users to verify connection
+ΓåÆ 7     const count = await prisma.user.count(
+Can't reach database server at base
+    at zr.handleRequestError (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\RequestHandler.ts:228:13)
+    at zr.handleAndLogRequestError (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\RequestHandler.ts:174:12)
+    at zr.request (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\RequestHandler.ts:143:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async a (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\getPrismaClient.ts:807:24)
+    at async main (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\verify-prisma.ts:7:23) {
+  code: 'P1001',
+  meta: {
+    modelName: 'User',
+    driverAdapterError: DriverAdapterError: DatabaseNotReachable
+        at PrismaPgAdapter.onError (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\adapter-pg\dist\index.js:687:11)
+        at PrismaPgAdapter.performIO (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\adapter-pg\dist\index.js:682:12)
+        at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+        at async PrismaPgAdapter.queryRaw (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\adapter-pg\dist\index.js:602:30)
+        at async e.interpretNode (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client-engine-runtime\src\interpreter\query-interpreter.ts:182:26)
+        at async e.interpretNode (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client-engine-runtime\src\interpreter\query-interpreter.ts:209:41)
+        at async e.interpretNode (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client-engine-runtime\src\interpreter\query-interpreter.ts:268:41)
+        at async e.run (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client-engine-runtime\src\interpreter\query-interpreter.ts:93:23)
+        at async e.execute (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\core\engines\client\LocalExecutor.ts:81:12)
+        at async qt.request (C:\Users\Delali\OneDrive\Documents\AntiGravity\anti-gravity-rideshare\node_modules\@prisma\client\src\runtime\core\engines\client\ClientEngine.ts:492:22) {
+      cause: [Object]
+    }
+  },
+  clientVersion: '7.4.0'
+}
