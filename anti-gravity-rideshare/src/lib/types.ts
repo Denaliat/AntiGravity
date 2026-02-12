@@ -1,12 +1,15 @@
-export type UserRole = 'ADMIN' | 'DRIVER' | 'SENDER' | 'RECIPIENT' | 'PARENT' | 'CHILD';
+export type UserRole = 'ADMIN' | 'DRIVER' | 'SENDER' | 'RECIPIENT' | 'PARENT' | 'CHILD' | 'LEAD_ADMIN' | 'SUPPORT' | 'DEVELOPER';
 
 export interface User {
     id: string;
     name: string;
     email: string;
     role: UserRole;
+    permissions?: string[]; // For SUPPORT role config
     parentId?: string; // For CHILD accounts
     isLocationHidden?: boolean; // For CHILD accounts
+    referralCode?: string; // For DRIVER accounts
+    walletBalance?: number; // For DRIVER accounts
 }
 
 export type DeliveryStatus = 'BOOKED' | 'PICKED_UP' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'EXCEPTION';
@@ -70,4 +73,13 @@ export interface Ride {
     status: 'REQUESTED' | 'ACCEPTED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
     fare: number;
     timestamp: string;
+}
+
+export interface ChangeRequest {
+    id: string;
+    developerId: string;
+    description: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    timestamp: string;
+    reviewedBy?: string;
 }

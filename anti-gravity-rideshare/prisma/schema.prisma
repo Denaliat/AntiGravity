@@ -1,0 +1,176 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  DRIVER
+  SENDER
+  RECIPIENT
+  PARENT
+  CHILD
+  LEAD_ADMIN
+  SUPPORT
+  DEVELOPER
+}
+
+enum DeliveryStatus {
+  BOOKED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION
+}
+
+enum RideStatus {
+  REQUESTED
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  role      UserRole
+
+  // Internal Roles
+  permissions String[] @default([])
+
+  // Child Specific
+  parentId         String?
+  isLocationHidden Boolean? @default(false)
+
+  // Driver Specific
+  referralCode     String?  @unique
+  walletBalance    Float    @default(0.0)
+  
+  // Driver Verification
+  licenseNumber         String?
+  licenseExpiry         DateTime?
+  insurancePolicyNumber String?
+  insuranceExpiry       DateTime?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  parent           User?  @relation("ParentChild", fields: [parentId], references: [id])
+  children         User[] @relation("ParentChild")
+  
+  sentParcels      ParcelDelivery[] @relation("Sender")
+  receivedParcels  ParcelDelivery[] @relation("Recipient")
+  driverParcels    ParcelDelivery[] @relation("Driver")
+  
+  riderRides       Ride[] @relation("Rider")
+  driverRides      Ride[] @relation("Driver")
+  
+  developerRequests ChangeRequest[] @relation("Developer")
+  reviewedRequests  ChangeRequest[] @relation("Reviewer")
+}
+
+model ParcelDelivery {
+  id           String         @id @default(uuid())
+  trackingId   String         @unique // Public tracking ID
+  
+  senderId     String
+  recipientId  String
+  driverId     String?
+  
+  pickupTime   DateTime?
+  deliveryTime DateTime?
+  status       DeliveryStatus @default(BOOKED)
+  
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  sender       User           @relation("Sender", fields: [senderId], references: [id])
+  recipient    User           @relation("Recipient", fields: [recipientId], references: [id])
+  driver       User?          @relation("Driver", fields: [driverId], references: [id])
+  
+  proof        ProofOfDelivery?
+  events       TrackingEvent[]
+}
+
+model ProofOfDelivery {
+  id                String   @id @default(uuid())
+  deliveryId        String   @unique
+  timestamp         DateTime @default(now())
+  
+  latitude          Float
+  longitude         Float
+  
+  signatureImageUrl String? // Encrypted URL/Base64
+  photoImageUrl     String? // Encrypted URL/Base64
+  recipientName     String
+  isEncrypted       Boolean  @default(true)
+  
+  delivery          ParcelDelivery @relation(fields: [deliveryId], references: [id])
+}
+
+model TrackingEvent {
+  id          String         @id @default(uuid())
+  deliveryId  String
+  timestamp   DateTime       @default(now())
+  
+  latitude    Float
+  longitude   Float
+  status      DeliveryStatus
+  notes       String?
+  
+  delivery    ParcelDelivery @relation(fields: [deliveryId], references: [id])
+}
+
+model Ride {
+  id              String     @id @default(uuid())
+  riderId         String
+  driverId        String?
+  
+  pickupLocation  String
+  dropoffLocation String
+  status          RideStatus @default(REQUESTED)
+  fare            Float
+  timestamp       DateTime   @default(now())
+  
+  rider           User       @relation("Rider", fields: [riderId], references: [id])
+  driver          User?      @relation("Driver", fields: [driverId], references: [id])
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  entityType String
+  entityId   String
+  action     String
+  userId     String
+  timestamp  DateTime @default(now())
+  details    String
+}
+
+model ChangeRequest {
+  id          String              @id @default(uuid())
+  developerId String
+  description String
+  status      ChangeRequestStatus @default(PENDING)
+  timestamp   DateTime            @default(now())
+  reviewedBy  String?
+  
+  developer   User                @relation("Developer", fields: [developerId], references: [id])
+  reviewer    User?               @relation("Reviewer", fields: [reviewedBy], references: [id])
+}
