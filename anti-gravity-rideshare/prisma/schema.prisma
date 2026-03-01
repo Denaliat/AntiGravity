@@ -12,6 +12,7 @@ datasource db {
 enum UserRole {
   ADMIN
   DRIVER
+  RIDER
   SENDER
   RECIPIENT
   PARENT
@@ -67,6 +68,12 @@ model User {
   insurancePolicyNumber String?
   insuranceExpiry       DateTime?
   
+  // Legal Consent
+  dateOfBirth           DateTime?
+  consentVersion        String?
+  consentDate           DateTime?
+  parentalConsentDate   DateTime?
+  
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -84,6 +91,8 @@ model User {
   
   developerRequests ChangeRequest[] @relation("Developer")
   reviewedRequests  ChangeRequest[] @relation("Reviewer")
+  
+  reporterIncidents Incident[]      @relation("Reporter")
 }
 
 model ParcelDelivery {
@@ -173,4 +182,44 @@ model ChangeRequest {
   
   developer   User                @relation("Developer", fields: [developerId], references: [id])
   reviewer    User?               @relation("Reviewer", fields: [reviewedBy], references: [id])
+}
+
+enum IncidentType {
+  ACCIDENT
+  SAFETY_CONCERN
+  LOST_ITEM
+  HARASSMENT
+  OTHER
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum IncidentPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Incident {
+  id              String           @id @default(uuid())
+  reporterId      String
+  rideId          String?
+  deliveryId      String?
+  type            IncidentType
+  status          IncidentStatus   @default(OPEN)
+  priority        IncidentPriority @default(MEDIUM)
+  description     String
+  resolutionNotes String?
+  timestamp       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  reporter        User             @relation("Reporter", fields: [reporterId], references: [id])
+  ride            Ride?            @relation(fields: [rideId], references: [id])
+  delivery        ParcelDelivery?  @relation(fields: [deliveryId], references: [id])
 }
