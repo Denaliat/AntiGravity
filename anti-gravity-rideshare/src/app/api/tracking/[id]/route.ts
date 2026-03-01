@@ -8,7 +8,7 @@ export async function GET(
     const { id } = await params;
 
     try {
-        const delivery = await db.deliveries.findById(id);
+        const delivery = await db.bookings.findByTrackingId(id);
 
         if (!delivery) {
             return NextResponse.json({ error: 'Delivery not found' }, { status: 404 });

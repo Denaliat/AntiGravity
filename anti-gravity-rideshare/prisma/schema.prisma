@@ -31,6 +31,13 @@ enum DeliveryStatus {
   EXCEPTION
 }
 
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 enum RideStatus {
   REQUESTED
   ACCEPTED
@@ -63,10 +70,14 @@ model User {
   walletBalance    Float    @default(0.0)
   
   // Driver Verification
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
   licenseNumber         String?
   licenseExpiry         DateTime?
+  licenseImageUrl       String?
   insurancePolicyNumber String?
   insuranceExpiry       DateTime?
+  insuranceImageUrl     String?
+  vulnerableSectorCheckUrl String?
   
   // Legal Consent
   dateOfBirth           DateTime?

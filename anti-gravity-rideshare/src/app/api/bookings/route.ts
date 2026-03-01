@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         newDelivery.auditLog.push(audit);
 
         // 5. Save to DB
-        await db.deliveries.create(newDelivery);
+        await db.bookings.create(newDelivery);
 
         return NextResponse.json({ success: true, delivery: newDelivery });
 

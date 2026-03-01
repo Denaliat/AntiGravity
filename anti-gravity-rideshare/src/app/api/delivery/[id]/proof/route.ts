@@ -19,7 +19,7 @@ export async function POST(
         const { signatureBase64, photoBase64, location } = body;
 
         // 2. Verify Delivery exists
-        const delivery = await db.deliveries.findById(id);
+        const delivery = await db.bookings.findById(id);
         if (!delivery) return NextResponse.json({ error: 'Delivery not found' }, { status: 404 });
 
         // 3. Encrypt Proofs
@@ -43,7 +43,7 @@ export async function POST(
         await db.proofs.create(proof);
 
         // 5. Update Delivery Status
-        await db.deliveries.updateStatus(id, 'DELIVERED');
+        await db.bookings.updateStatus(id, 'DELIVERED', undefined);
         delivery.proofOfDelivery = proof; // Update in-memory reference directly for simplicity
 
         // 6. Tracking Event
