@@ -1,31 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAdminAuth } from '@/lib/api-auth';
 
 /**
  * POST /api/admin/documents/[id]/review
  * Submits an approve / reject / escalate decision for a document.
  * Writes a ReviewAuditEvent and calls db.verificationDocuments.review().
+ * Requires: ADMIN | LEAD_ADMIN | SUPPORT role.
  *
  * Body: {
  *   action:                 'APPROVED' | 'REJECTED' | 'ESCALATED'
- *   reviewerId:             string
  *   rejectionReason?:       string  (required when action = REJECTED)
  *   secondaryReviewRequired?: boolean
  * }
+ * Note: reviewerId is taken from the authenticated session, not the body.
  */
 export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    // ── Auth guard ────────────────────────────────────────────────────────
+    const authResult = await requireAdminAuth(req);
+    if (authResult instanceof NextResponse) return authResult; // 401 or 403
+
+    const { user } = authResult;
     const { id } = await params;
 
     try {
         const body = await req.json();
-        const { action, reviewerId, rejectionReason, secondaryReviewRequired } = body;
+        const { action, rejectionReason, secondaryReviewRequired } = body;
+
+        // reviewerId comes from the session — not trusted from client body
+        const reviewerId = user.id;
 
         // Validate
-        if (!action || !reviewerId) {
-            return NextResponse.json({ error: 'action and reviewerId are required' }, { status: 400 });
+        if (!action) {
+            return NextResponse.json({ error: 'action is required' }, { status: 400 });
+        }
+        if (!['APPROVED', 'REJECTED', 'ESCALATED'].includes(action)) {
+            return NextResponse.json({ error: 'action must be APPROVED, REJECTED, or ESCALATED' }, { status: 400 });
         }
         if (action === 'REJECTED' && !rejectionReason) {
             return NextResponse.json(

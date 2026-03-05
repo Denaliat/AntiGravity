@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { uploadDriverDocument } from '@/lib/storage';
 import { db } from '@/lib/db';
 import { VerificationDocumentType } from '@/lib/types';
+import { requireAuth } from '@/lib/api-auth';
 
 // Document types that carry an expiry date
 const EXPIRY_FIELD_MAP: Record<string, VerificationDocumentType> = {
@@ -18,28 +19,61 @@ const EXPIRY_DATE_MAP: Record<string, string> = {
     registrationFile: 'registrationExpiry',
 };
 
+// ── File validation ────────────────────────────────────────────────────────
+const ALLOWED_MIME_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+]);
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function validateFile(file: File, fieldName: string): string | null {
+    if (!ALLOWED_MIME_TYPES.has(file.type)) {
+        return `${fieldName}: unsupported file type "${file.type}". Allowed: JPEG, PNG, WebP, PDF.`;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+        return `${fieldName}: file exceeds the 10 MB limit (${(file.size / 1024 / 1024).toFixed(1)} MB).`;
+    }
+    return null;
+}
+
 export async function POST(req: NextRequest) {
+    // ── 1. Verify session — userId comes from the JWT, not the request body ──
+    const authResult = await requireAuth(req);
+    if (authResult instanceof NextResponse) return authResult; // 401
+
+    const { user } = authResult;
+
+    // Only DRIVER-role users may submit onboarding documents
+    if (user.role !== 'DRIVER') {
+        return NextResponse.json(
+            { error: 'Forbidden — only drivers may submit onboarding documents' },
+            { status: 403 }
+        );
+    }
+
+    const userId = user.id; // trusted from session, not request body
+
     try {
         const formData = await req.formData();
 
-        // ── 1. Identify the driver ─────────────────────────────────────
-        const userId = formData.get('userId') as string | null;
-        if (!userId) {
-            return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-        }
-
         // ── 2. Update personal details on the User row ─────────────────
-        const personalFields: Record<string, string> = {};
-        for (const field of ['name', 'dateOfBirth', 'licenseNumber', 'licenseExpiry',
-            'insurancePolicyNumber', 'insuranceExpiry'] as const) {
+        const ALLOWED_PERSONAL_FIELDS = [
+            'name', 'dateOfBirth', 'licenseNumber', 'licenseExpiry',
+            'insurancePolicyNumber', 'insuranceExpiry',
+        ] as const;
+
+        const personalFields: Partial<Record<typeof ALLOWED_PERSONAL_FIELDS[number], string>> = {};
+        for (const field of ALLOWED_PERSONAL_FIELDS) {
             const val = formData.get(field) as string | null;
             if (val) personalFields[field] = val;
         }
         if (Object.keys(personalFields).length > 0) {
-            await db.drivers.updatePersonalDetails(userId, personalFields as any);
+            await db.drivers.updatePersonalDetails(userId, personalFields);
         }
 
-        // ── 3. Upload each document file and record in DB ──────────────
+        // ── 3. Validate then upload each document file ─────────────────
         const uploadedTypes: VerificationDocumentType[] = [];
         const errors: string[] = [];
 
@@ -47,17 +81,21 @@ export async function POST(req: NextRequest) {
             const file = formData.get(fieldName) as File | null;
             if (!file) continue;
 
+            // Server-side file validation
+            const validationError = validateFile(file, fieldName);
+            if (validationError) {
+                errors.push(validationError);
+                continue;
+            }
+
             try {
-                // Upload to Supabase Storage
                 const fileUrl = await uploadDriverDocument(userId, docType, file);
 
-                // Determine expiresAt for documents with natural expiry
                 const expiryKey = EXPIRY_DATE_MAP[fieldName];
                 const expiresAt = expiryKey
                     ? (formData.get(expiryKey) as string | null) ?? undefined
                     : undefined;
 
-                // Record in UserVerificationDocument table
                 await db.verificationDocuments.upsertSubmission(
                     userId,
                     docType,
@@ -72,7 +110,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (errors.length > 0 && uploadedTypes.length === 0) {
-            return NextResponse.json({ error: 'All uploads failed', details: errors }, { status: 500 });
+            return NextResponse.json({ error: 'All uploads failed', details: errors }, { status: 422 });
         }
 
         // ── 4. Return result ───────────────────────────────────────────

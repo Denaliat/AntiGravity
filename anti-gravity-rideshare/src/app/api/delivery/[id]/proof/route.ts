@@ -1,34 +1,39 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { EncryptionService } from '@/lib/encryption';
 import { ProofOfDelivery, TrackingEvent, AuditEvent } from '@/lib/types';
 import { randomUUID } from 'crypto';
+import { requireAuth } from '@/lib/api-auth';
 
+/**
+ * POST /api/delivery/[id]/proof
+ * Submits proof of delivery (signature + photo) for a completed delivery.
+ * Requires: authenticated session (DRIVER role recommended).
+ */
 export async function POST(
-    request: Request,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    // ── Auth guard ─────────────────────────────────────────────────────────
+    const authResult = await requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { user: driver } = authResult;
     const { id } = await params;
 
     try {
-        // 1. Simulate Driver Auth
-        const driver = await db.users.findByEmail('driver@example.com');
-        if (!driver) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
         const body = await request.json();
         const { signatureBase64, photoBase64, location } = body;
 
-        // 2. Verify Delivery exists
+        // Verify Delivery exists
         const delivery = await db.bookings.findById(id);
         if (!delivery) return NextResponse.json({ error: 'Delivery not found' }, { status: 404 });
 
-        // 3. Encrypt Proofs
-        // In a real app, we'd upload to Cloud Storage and only store the URL + Encryption Key ID
-        // or store the encrypted blob if small enough. Here we mock encrypting the string.
+        // Encrypt Proofs
         const encryptedSignature = signatureBase64 ? EncryptionService.encrypt(signatureBase64) : undefined;
         const encryptedPhoto = photoBase64 ? EncryptionService.encrypt(photoBase64) : undefined;
 
-        // 4. Create Proof Record
+        // Create Proof Record
         const proof: ProofOfDelivery = {
             proofId: randomUUID(),
             deliveryId: id,
@@ -36,28 +41,28 @@ export async function POST(
             location: location || { latitude: 0, longitude: 0 },
             signatureImageUrl: encryptedSignature,
             photoImageUrl: encryptedPhoto,
-            recipientName: 'Recipient (Confirmed)', // simplified
-            isEncrypted: true
+            recipientName: 'Recipient (Confirmed)',
+            isEncrypted: true,
         };
 
         await db.proofs.create(proof);
 
-        // 5. Update Delivery Status
+        // Update Delivery Status
         await db.bookings.updateStatus(id, 'DELIVERED', undefined);
-        delivery.proofOfDelivery = proof; // Update in-memory reference directly for simplicity
+        delivery.proofOfDelivery = proof;
 
-        // 6. Tracking Event
+        // Tracking Event
         const trackingEvent: TrackingEvent = {
             eventId: randomUUID(),
             deliveryId: id,
             timestamp: new Date().toISOString(),
             location: location || { latitude: 0, longitude: 0 },
             status: 'DELIVERED',
-            notes: 'Delivered to recipient'
+            notes: 'Delivered to recipient',
         };
         delivery.trackingEvents.push(trackingEvent);
 
-        // 7. Audit Log
+        // Audit Log — uses real driver id from session
         const audit: AuditEvent = {
             auditId: randomUUID(),
             entityType: 'ProofOfDelivery',
@@ -65,7 +70,7 @@ export async function POST(
             action: 'CREATED',
             userId: driver.id,
             timestamp: new Date().toISOString(),
-            details: 'Proof of Delivery submitted and encrypted'
+            details: 'Proof of Delivery submitted and encrypted',
         };
         delivery.auditLog.push(audit);
 

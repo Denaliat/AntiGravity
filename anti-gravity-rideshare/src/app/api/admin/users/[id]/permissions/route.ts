@@ -1,27 +1,31 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireLeadAdminAuth } from '@/lib/api-auth';
 
+/**
+ * PATCH /api/admin/users/[id]/permissions
+ * Updates the permissions array for a SUPPORT-role user.
+ * Requires: LEAD_ADMIN role.
+ */
 export async function PATCH(
-    request: Request,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     const { id } = await params;
 
-    try {
-        // 1. Simulate Lead Admin Auth
-        const admin = await db.users.findByEmail('lead@example.com');
-        if (!admin || admin.role !== 'LEAD_ADMIN') {
-            return NextResponse.json({ error: 'Unauthorized: Requires Lead Admin' }, { status: 403 });
-        }
+    // ── Auth guard — Lead Admin only ───────────────────────────────────────
+    const authResult = await requireLeadAdminAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
 
+    try {
         const body = await request.json();
         const { permissions } = body;
 
-        // 2. Update Target User
+        // Fetch and validate the target user
         const targetUser = await db.users.findById(id);
         if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-        // Only allow updating Support staff permissions for now
+        // Only allow updating Support staff permissions
         if (targetUser.role !== 'SUPPORT') {
             return NextResponse.json({ error: 'Can only modify Support Staff permissions' }, { status: 400 });
         }

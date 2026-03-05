@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, ParcelDelivery, ProofOfDelivery, TrackingEvent, AuditEvent, Ride, ChangeRequest, Incident, UserVerificationDocument, VerificationDocumentType, DriverEligibility, VerificationSignal, ReviewAuditEvent } from './types';
+import { User, ParcelDelivery, ProofOfDelivery, TrackingEvent, AuditEvent, Ride, ChangeRequest, Incident, UserVerificationDocument, VerificationDocumentType, DriverEligibility, VerificationSignal, ReviewAuditEvent, EmergencyContact, EmergencyRecording, RideRequest, RideNotification } from './types';
 
 export * from './types';
 
@@ -52,7 +52,13 @@ export const db = {
             return data as User;
         },
         update: async (id: string, updates: Partial<User>) => {
-            const { data, error } = await supabase.from('User').update(updates).eq('id', id).select().single();
+            // Guard: these fields must never be updated via the generic update path
+            const DENIED_FIELDS: (keyof User)[] = ['id', 'role', 'parentId'];
+            const safeUpdates = { ...updates };
+            for (const field of DENIED_FIELDS) {
+                delete safeUpdates[field];
+            }
+            const { data, error } = await supabase.from('User').update(safeUpdates).eq('id', id).select().single();
             if (error) throw error;
             return data as User;
         },
@@ -266,15 +272,32 @@ export const db = {
                 'insurancePolicyNumber' | 'insuranceExpiry'
             >>
         ): Promise<User> => {
+            // Explicit allowlist — only write the 6 permitted fields
+            const ALLOWED: (keyof typeof fields)[] = [
+                'name', 'dateOfBirth', 'licenseNumber', 'licenseExpiry',
+                'insurancePolicyNumber', 'insuranceExpiry',
+            ];
+            const safeFields = ALLOWED.reduce((acc, key) => {
+                if (fields[key] !== undefined) acc[key] = fields[key] as string;
+                return acc;
+            }, {} as Record<string, string>);
+
+            if (Object.keys(safeFields).length === 0) {
+                // Nothing to update — return current row
+                const { data } = await supabase.from('User').select('*').eq('id', userId).single();
+                return data as User;
+            }
+
             const { data, error } = await supabase
                 .from('User')
-                .update(fields)
+                .update(safeFields)
                 .eq('id', userId)
                 .select()
                 .single();
             if (error) throw error;
             return data as User;
         },
+
 
         /** Query the DriverEligibility VIEW for a single driver. */
         getEligibility: async (userId: string): Promise<DriverEligibility | null> => {
@@ -358,4 +381,197 @@ export const db = {
             })) as ReviewAuditEvent[];
         },
     },
+
+    // ── Emergency Contacts ─────────────────────────────────────────────────────────
+    emergencyContacts: {
+        /** Fetch all emergency contacts for a parent. */
+        findByParent: async (parentId: string): Promise<EmergencyContact[]> => {
+            const { data, error } = await supabase
+                .from('EmergencyContact')
+                .select('*')
+                .eq('parentId', parentId)
+                .order('isPrimary', { ascending: false });
+            if (error) throw error;
+            return (data ?? []) as EmergencyContact[];
+        },
+
+        /** Returns true if parent has at least 1 primary AND 1 secondary contact. */
+        hasRequiredContacts: async (parentId: string): Promise<boolean> => {
+            const contacts = await db.emergencyContacts.findByParent(parentId);
+            return contacts.some(c => c.isPrimary) && contacts.some(c => !c.isPrimary);
+        },
+
+        /** Create or replace an emergency contact for a parent.
+         *  Enforces max 1 primary and max 1 secondary per parent. */
+        upsert: async (
+            parentId: string,
+            contact: Omit<EmergencyContact, 'id' | 'parentId' | 'createdAt'>
+        ): Promise<EmergencyContact> => {
+            // Validate E.164 phone format
+            const e164Regex = /^\+[1-9]\d{1,14}$/;
+            if (!e164Regex.test(contact.phone)) {
+                throw new Error('Phone must be in E.164 format (e.g. +14165550100)');
+            }
+            // Delete existing contact of same type (primary or secondary) for this parent
+            await supabase
+                .from('EmergencyContact')
+                .delete()
+                .eq('parentId', parentId)
+                .eq('isPrimary', contact.isPrimary);
+
+            const { data, error } = await supabase
+                .from('EmergencyContact')
+                .insert({ ...contact, parentId })
+                .select()
+                .single();
+            if (error) throw error;
+            return data as EmergencyContact;
+        },
+    },
+
+    // ── Emergency Recordings ─────────────────────────────────────────────────────
+    emergencyRecordings: {
+        /** Create a new recording row (incidentId is null initially). */
+        create: async (childId: string): Promise<EmergencyRecording> => {
+            const { data, error } = await supabase
+                .from('EmergencyRecording')
+                .insert({
+                    childId,
+                    startedBy: 'CHILD_SOS',
+                    incidentId: null,
+                    status: 'RECORDING',
+                })
+                .select()
+                .single();
+            if (error) throw error;
+            return data as EmergencyRecording;
+        },
+
+        /** Link the recording to an Incident once created (optimistic attach). */
+        attachIncident: async (recordingId: string, incidentId: string): Promise<void> => {
+            const { error } = await supabase
+                .from('EmergencyRecording')
+                .update({ incidentId })
+                .eq('id', recordingId);
+            if (error) console.error('Failed to attach incidentId to recording:', error);
+        },
+
+        /** Mark recording as complete and store the uploaded URL. */
+        markComplete: async (recordingId: string, recordingUrl: string, childId: string): Promise<EmergencyRecording> => {
+            const { data, error } = await supabase
+                .from('EmergencyRecording')
+                .update({
+                    status: 'COMPLETE',
+                    recordingUrl,
+                    completedAt: new Date().toISOString(),
+                })
+                .eq('id', recordingId)
+                .eq('childId', childId) // ownership guard
+                .select()
+                .single();
+            if (error) throw error;
+            return data as EmergencyRecording;
+        },
+
+        /** Mark recording as failed (e.g. MediaRecorder error). */
+        markFailed: async (recordingId: string, childId: string): Promise<void> => {
+            const { error } = await supabase
+                .from('EmergencyRecording')
+                .update({ status: 'FAILED', completedAt: new Date().toISOString() })
+                .eq('id', recordingId)
+                .eq('childId', childId);
+            if (error) console.error('Failed to mark recording as FAILED:', error);
+        },
+
+        /** Fetch all recordings for an incident (for parent/admin view). */
+        findByIncident: async (incidentId: string): Promise<EmergencyRecording[]> => {
+            const { data, error } = await supabase
+                .from('EmergencyRecording')
+                .select('*')
+                .eq('incidentId', incidentId);
+            if (error) throw error;
+            return (data ?? []) as EmergencyRecording[];
+        },
+    },
+
+    // ── Ride Requests (child-initiated, not a Ride row) ────────────────────────────
+    rideRequests: {
+        create: async (req: Omit<RideRequest, 'id' | 'createdAt' | 'status'>): Promise<RideRequest> => {
+            const { data, error } = await supabase
+                .from('RideRequest')
+                .insert({ ...req, status: 'PENDING' })
+                .select()
+                .single();
+            if (error) throw error;
+            return data as RideRequest;
+        },
+
+        findByParent: async (parentId: string): Promise<RideRequest[]> => {
+            const { data, error } = await supabase
+                .from('RideRequest')
+                .select('*')
+                .eq('parentId', parentId)
+                .order('createdAt', { ascending: false });
+            if (error) throw error;
+            return (data ?? []) as RideRequest[];
+        },
+
+        /** Count ride requests for a child within a rolling time window (for rate limiting). */
+        countRecent: async (childId: string, windowMinutes: number): Promise<number> => {
+            const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+            const { count, error } = await supabase
+                .from('RideRequest')
+                .select('id', { count: 'exact', head: true })
+                .eq('childId', childId)
+                .gte('createdAt', since);
+            if (error) return 0;
+            return count ?? 0;
+        },
+
+        updateStatus: async (id: string, status: RideRequest['status']): Promise<RideRequest> => {
+            const { data, error } = await supabase
+                .from('RideRequest')
+                .update({ status })
+                .eq('id', id)
+                .select()
+                .single();
+            if (error) throw error;
+            return data as RideRequest;
+        },
+    },
+
+    // ── Ride Notifications ──────────────────────────────────────────────────────────
+    rideNotifications: {
+        create: async (n: Omit<RideNotification, 'id' | 'createdAt' | 'read'>): Promise<RideNotification> => {
+            const { data, error } = await supabase
+                .from('RideNotification')
+                .insert({ ...n, read: false })
+                .select()
+                .single();
+            if (error) throw error;
+            return data as RideNotification;
+        },
+
+        findByParent: async (parentId: string, unreadOnly = false): Promise<RideNotification[]> => {
+            let query = supabase
+                .from('RideNotification')
+                .select('*')
+                .eq('parentId', parentId)
+                .order('createdAt', { ascending: false });
+            if (unreadOnly) query = query.eq('read', false);
+            const { data, error } = await query;
+            if (error) throw error;
+            return (data ?? []) as RideNotification[];
+        },
+
+        markRead: async (id: string, parentId: string): Promise<void> => {
+            const { error } = await supabase
+                .from('RideNotification')
+                .update({ read: true })
+                .eq('id', id)
+                .eq('parentId', parentId); // ownership guard
+            if (error) console.error('Failed to mark notification as read:', error);
+        },
+    },
 };
+

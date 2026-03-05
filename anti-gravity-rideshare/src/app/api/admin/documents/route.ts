@@ -1,21 +1,23 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/api-auth';
 
 /**
  * GET /api/admin/documents?status=PENDING
  * Returns all UserVerificationDocument rows matching the given status,
  * grouped by userId for the reviewer queue display.
+ * Requires: ADMIN | LEAD_ADMIN | SUPPORT role.
  */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
+    // ── Auth guard — must be an admin ──────────────────────────────────────
+    const authResult = await requireAdminAuth(req);
+    if (authResult instanceof NextResponse) return authResult; // 401 or 403
+
+    const { supabase } = authResult;
+
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') ?? 'PENDING';
 
     try {
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-
         const { data: docs, error: docsError } = await supabase
             .from('UserVerificationDocument')
             .select('*, User:userId(id, name, email)')

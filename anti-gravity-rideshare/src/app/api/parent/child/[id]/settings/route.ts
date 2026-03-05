@@ -1,35 +1,59 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAuth } from '@/lib/api-auth';
 
+/**
+ * PATCH /api/parent/child/[id]/settings
+ * Updates settings for a child account (e.g. location sharing).
+ * Requires: PARENT role + the target child must belong to this parent.
+ */
 export async function PATCH(
-    request: Request,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const { id } = await params; // Child ID
+    const authResult = await requireAuth(request);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { user: parent } = authResult;
+
+    if (parent.role !== 'PARENT') {
+        return NextResponse.json(
+            { error: 'Forbidden — parent access only' },
+            { status: 403 }
+        );
+    }
+
+    const { id: childId } = await params;
 
     try {
-        // 1. Simulate Parent Auth
-        const parent = await db.users.findByEmail('parent@example.com');
-        if (!parent || parent.role !== 'PARENT') {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        // Verify the child belongs to this parent
+        const child = await db.users.findById(childId);
+        if (!child || child.role !== 'CHILD') {
+            return NextResponse.json({ error: 'Child not found' }, { status: 404 });
+        }
+        if (child.parentId !== parent.id) {
+            return NextResponse.json(
+                { error: 'Forbidden — this child does not belong to your account' },
+                { status: 403 }
+            );
         }
 
         const body = await request.json();
-        const { isLocationHidden } = body;
+        const { isLocationHidden, rideRestrictionsEnabled, allowedPickupLocations } = body;
 
-        // 2. Verify Child
-        const child = await db.users.findById(id);
-        if (!child || child.parentId !== parent.id) {
-            return NextResponse.json({ error: 'Child not found or unauthorized' }, { status: 404 });
+        // Build the update payload with only the permitted fields
+        const updates: Partial<typeof child> = {};
+        if (typeof isLocationHidden === 'boolean') updates.isLocationHidden = isLocationHidden;
+        if (typeof rideRestrictionsEnabled === 'boolean') updates.rideRestrictionsEnabled = rideRestrictionsEnabled;
+        if (Array.isArray(allowedPickupLocations)) updates.allowedPickupLocations = allowedPickupLocations;
+
+        if (Object.keys(updates).length === 0) {
+            return NextResponse.json({ error: 'No valid settings provided' }, { status: 400 });
         }
 
-        // 3. Update Settings
-        if (typeof isLocationHidden === 'boolean') {
-            child.isLocationHidden = isLocationHidden;
-            // In real app update DB: await db.users.update(id, { isLocationHidden });
-        }
-
-        return NextResponse.json({ success: true, child });
+        // Persist to DB (previously this was only updating the in-memory object)
+        const updatedChild = await db.users.update(childId, updates);
+        return NextResponse.json({ success: true, child: updatedChild });
 
     } catch (error) {
         console.error('Settings update error:', error);

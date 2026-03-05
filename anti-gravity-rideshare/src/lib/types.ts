@@ -83,16 +83,22 @@ export interface User {
     email: string;
     role: UserRole;
     permissions?: string[]; // For SUPPORT role config
-    parentId?: string; // For CHILD accounts
-    isLocationHidden?: boolean; // For CHILD accounts
-    referralCode?: string; // For DRIVER accounts
-    walletBalance?: number; // For DRIVER accounts
-    consentVersion?: string; // e.g., "v1.0"
-    consentDate?: string; // ISO Date of acceptance
-    dateOfBirth?: string; // ISO Date (YYYY-MM-DD)
-    parentalConsentDate?: string; // ISO Date (if under 18)
-
-    // Driver license metadata (stored on User for quick access)
+    // CHILD account fields
+    parentId?: string;
+    isLocationHidden?: boolean;
+    rideRestrictionsEnabled?: boolean;    // Parent can disable rides entirely for this child
+    allowedPickupLocations?: string[];    // Optional approved pickup addresses
+    parentChildEnabled?: boolean;         // Set by parent during onboarding
+    // PARENT account fields
+    emergencyContacts?: EmergencyContact[];
+    // Common optional fields
+    referralCode?: string;
+    walletBalance?: number;
+    consentVersion?: string;
+    consentDate?: string;           // ISO Date of acceptance
+    dateOfBirth?: string;           // ISO Date (YYYY-MM-DD)
+    parentalConsentDate?: string;   // ISO Date (if under 18)
+    // Driver license metadata
     licenseNumber?: string;
     licenseExpiry?: string;         // ISO Date
     insurancePolicyNumber?: string;
@@ -151,11 +157,71 @@ export interface AuditEvent {
     details: string;
 }
 
+// ── Emergency Contact ────────────────────────────────────────────────────────
+
+/** Parent's emergency contact. Parent must have ≥1 primary + ≥1 secondary before
+ *  the parent-child feature can be used for ride booking or SOS. */
+export interface EmergencyContact {
+    id: string;
+    parentId: string;
+    name: string;
+    phone: string;        // E.164 format e.g. +14165550100
+    email?: string;
+    relationship: string; // e.g. 'Spouse', 'Grandparent'
+    isPrimary: boolean;
+    createdAt: string;    // ISO
+}
+
+// ── Emergency Recording ──────────────────────────────────────────────────────
+
+/** Created when a child presses SOS. incidentId is null initially and attached
+ *  once the Incident row is created, allowing flexible future reuse. */
+export interface EmergencyRecording {
+    id: string;
+    incidentId: string | null;    // nullable — linked after Incident created
+    childId: string;
+    startedBy: 'CHILD_SOS';       // explicit consent/disclosure metadata
+    recordingUrl: string | null;  // Supabase Storage path (null until upload complete)
+    status: 'RECORDING' | 'COMPLETE' | 'FAILED';
+    startedAt: string;            // ISO
+    completedAt: string | null;
+}
+
+// ── Ride Request (child-initiated, NOT a Ride row) ────────────────────────────
+
+/** Created when a child requests a ride from their parent. The parent must
+ *  approve before a Ride is actually created. Rate-limited to 2/child/15 min. */
+export interface RideRequest {
+    id: string;
+    childId: string;
+    parentId: string;
+    requestedPickup: string;
+    requestedDropoff: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+    createdAt: string; // ISO
+}
+
+// ── Ride Notification ─────────────────────────────────────────────────────────
+
+/** In-app notification written to the parent when a ride event occurs or a
+ *  child submits a ride request. Designed to be extended with SMS/push later
+ *  by adding a channel field and updating emitRideEvent(). */
+export interface RideNotification {
+    id: string;
+    parentId: string;
+    rideId?: string;
+    rideRequestId?: string;
+    message: string;
+    read: boolean;
+    createdAt: string; // ISO
+}
+
 export interface Ride {
     rideId: string;
-    riderId: string;
+    riderId: string;                   // The passenger (child's id when booked by parent)
+    requestedByParentId?: string;      // Set when a parent books on behalf of a child
     driverId?: string;
-    pickupLocation: string; // Simplified for prototype
+    pickupLocation: string;
     dropoffLocation: string;
     status: 'REQUESTED' | 'ACCEPTED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
     fare: number;
