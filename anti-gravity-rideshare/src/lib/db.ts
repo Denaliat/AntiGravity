@@ -431,6 +431,32 @@ export const db = {
 
     // ── Emergency Recordings ─────────────────────────────────────────────────────
     emergencyRecordings: {
+        /** Find an active (status=RECORDING) recording for a child — for deduplication. */
+        findActiveByChild: async (childId: string): Promise<EmergencyRecording | null> => {
+            const { data, error } = await supabase
+                .from('EmergencyRecording')
+                .select('*')
+                .eq('childId', childId)
+                .eq('status', 'RECORDING')
+                .order('startedAt', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (error) return null;
+            return data as EmergencyRecording | null;
+        },
+
+        /** Count SOS activations for a child in a rolling time window (for rate limiting). */
+        countRecentByChild: async (childId: string, windowMinutes: number): Promise<number> => {
+            const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+            const { count, error } = await supabase
+                .from('EmergencyRecording')
+                .select('id', { count: 'exact', head: true })
+                .eq('childId', childId)
+                .gte('startedAt', since);
+            if (error) return 0;
+            return count ?? 0;
+        },
+
         /** Create a new recording row (incidentId is null initially). */
         create: async (childId: string): Promise<EmergencyRecording> => {
             const { data, error } = await supabase
@@ -571,6 +597,33 @@ export const db = {
                 .eq('id', id)
                 .eq('parentId', parentId); // ownership guard
             if (error) console.error('Failed to mark notification as read:', error);
+        },
+    },
+
+    // ── Audit Logging ───────────────────────────────────────────────────────────────
+    /** Lightweight audit trail for security-relevant parent-child events. */
+    parentChildAudit: {
+        log: async (event: {
+            action: string;      // e.g. 'SOS_ACTIVATED', 'RIDE_CREATED', 'CONTACTS_CHANGED'
+            actorId: string;     // Who performed the action
+            childId?: string;
+            parentId?: string;
+            targetId?: string;   // e.g. rideId, recordingId, contactId
+            metadata?: Record<string, unknown>;
+        }): Promise<void> => {
+            try {
+                await supabase.from('ParentChildAuditEvent').insert({
+                    action: event.action,
+                    actorId: event.actorId,
+                    childId: event.childId ?? null,
+                    parentId: event.parentId ?? null,
+                    targetId: event.targetId ?? null,
+                    metadata: event.metadata ?? null,
+                });
+            } catch (err) {
+                // Audit failure must never break the primary flow
+                console.error('[parentChildAudit] Failed to log event:', err);
+            }
         },
     },
 };

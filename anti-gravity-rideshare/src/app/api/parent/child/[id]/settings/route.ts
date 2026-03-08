@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/api-auth';
+import { normalizeStringArray } from '@/lib/sanitize';
 
 /**
  * PATCH /api/parent/child/[id]/settings
@@ -45,7 +46,7 @@ export async function PATCH(
         const updates: Partial<typeof child> = {};
         if (typeof isLocationHidden === 'boolean') updates.isLocationHidden = isLocationHidden;
         if (typeof rideRestrictionsEnabled === 'boolean') updates.rideRestrictionsEnabled = rideRestrictionsEnabled;
-        if (Array.isArray(allowedPickupLocations)) updates.allowedPickupLocations = allowedPickupLocations;
+        if (Array.isArray(allowedPickupLocations)) updates.allowedPickupLocations = normalizeStringArray(allowedPickupLocations);
 
         if (Object.keys(updates).length === 0) {
             return NextResponse.json({ error: 'No valid settings provided' }, { status: 400 });

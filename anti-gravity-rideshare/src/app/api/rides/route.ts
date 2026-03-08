@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { Ride } from '@/lib/types';
 import { randomUUID } from 'crypto';
 import { requireAuth } from '@/lib/api-auth';
+import { getDirections, calculateFare } from '@/lib/maps';
 
 /**
  * POST /api/rides
@@ -33,19 +34,40 @@ export async function POST(request: NextRequest) {
 
     try {
         const body = await request.json();
-        const { pickup, dropoff } = body;
+        const { pickup, pickupCoords, dropoff, dropoffCoords } = body;
 
         if (!pickup || !dropoff) {
             return NextResponse.json({ error: 'pickup and dropoff are required' }, { status: 400 });
+        }
+
+        let distanceMeters = 0;
+        let durationSeconds = 0;
+        let calculatedFare = 15.00; // fallback
+
+        // Securely calculate directions if we have coordinates
+        if (pickupCoords && dropoffCoords) {
+            try {
+                const directions = await getDirections(pickupCoords, dropoffCoords);
+                distanceMeters = directions.distanceMeters;
+                durationSeconds = directions.durationSeconds;
+                calculatedFare = calculateFare(distanceMeters, durationSeconds);
+            } catch (err) {
+                console.warn("Directions API failed, using fallback fare:", err);
+            }
         }
 
         const newRide: Ride = {
             rideId: randomUUID(),
             riderId: rider.id,
             pickupLocation: pickup,
+            pickupCoords,
             dropoffLocation: dropoff,
+            dropoffCoords,
+            distanceMeters,
+            durationSeconds,
+            estimatedFare: calculatedFare, // Expose to client
             status: 'REQUESTED',
-            fare: 15.00,
+            fare: calculatedFare, // Authoritative price saved in DB
             timestamp: new Date().toISOString(),
         };
 

@@ -29,13 +29,17 @@ export default function ParentDashboard() {
 
     useEffect(() => {
         fetchAll();
+        // Poll every 30s for fresh notifications + contacts status
+        const interval = setInterval(fetchAll, 30000);
+        return () => clearInterval(interval);
     }, []);
 
     async function fetchAll() {
-        setLoading(true);
+        setLoading(prev => prev); // keep existing loading state on poll
         try {
-            const [contactsRes, notifRes] = await Promise.all([
+            const [contactsRes, notifRes, requestsRes] = await Promise.all([
                 fetch('/api/parent/emergency-contacts'),
+                fetch('/api/parent/notifications'),
                 fetch('/api/rides'),
             ]);
             if (contactsRes.ok) {
@@ -44,7 +48,8 @@ export default function ParentDashboard() {
                 setSetupComplete(d.setupComplete ?? false);
             }
             if (notifRes.ok) {
-                // Notifications would come from a dedicated endpoint in prod
+                const d = await notifRes.json();
+                setNotifications(d.notifications ?? []);
             }
         } catch (e) {
             console.error(e);

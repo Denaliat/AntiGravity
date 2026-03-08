@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { ChangeRequest } from '@/lib/types';
 import { randomUUID } from 'crypto';
+import { normalizeText } from '@/lib/sanitize';
 
 export async function POST(request: Request) {
     try {
@@ -9,7 +10,8 @@ export async function POST(request: Request) {
         const dev = await db.users.findByEmail('dev@example.com');
         if (!dev || dev.role !== 'DEVELOPER') return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
 
-        const { description } = await request.json();
+        const body = await request.json();
+        const description = body.description ? normalizeText(body.description) : body.description;
 
         const newRequest: ChangeRequest = {
             id: randomUUID(),

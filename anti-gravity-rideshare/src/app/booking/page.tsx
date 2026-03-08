@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import PlacesAutocomplete from '@/components/maps/PlacesAutocomplete';
 
 export default function BookingPage() {
     const router = useRouter();
@@ -56,12 +57,14 @@ export default function BookingPage() {
 
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Recipient Address</label>
-                        <input
-                            type="text"
-                            required
+                        <PlacesAutocomplete
+                            placeholder="Enter delivery address"
                             className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={formData.recipientAddress}
-                            onChange={e => setFormData({ ...formData, recipientAddress: e.target.value })}
+                            onPlaceSelect={(place) => {
+                                if (place?.formatted_address) {
+                                    setFormData({ ...formData, recipientAddress: place.formatted_address });
+                                }
+                            }}
                         />
                     </div>
 

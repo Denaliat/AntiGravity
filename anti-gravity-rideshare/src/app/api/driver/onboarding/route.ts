@@ -3,6 +3,7 @@ import { uploadDriverDocument } from '@/lib/storage';
 import { db } from '@/lib/db';
 import { VerificationDocumentType } from '@/lib/types';
 import { requireAuth } from '@/lib/api-auth';
+import { normalizeText } from '@/lib/sanitize';
 
 // Document types that carry an expiry date
 const EXPIRY_FIELD_MAP: Record<string, VerificationDocumentType> = {
@@ -64,10 +65,13 @@ export async function POST(req: NextRequest) {
             'insurancePolicyNumber', 'insuranceExpiry',
         ] as const;
 
+        // Fields that contain free-text and need Unicode normalization
+        const TEXT_FIELDS_TO_NORMALIZE = new Set(['name', 'licenseNumber', 'insurancePolicyNumber']);
+
         const personalFields: Partial<Record<typeof ALLOWED_PERSONAL_FIELDS[number], string>> = {};
         for (const field of ALLOWED_PERSONAL_FIELDS) {
             const val = formData.get(field) as string | null;
-            if (val) personalFields[field] = val;
+            if (val) personalFields[field] = TEXT_FIELDS_TO_NORMALIZE.has(field) ? normalizeText(val) : val;
         }
         if (Object.keys(personalFields).length > 0) {
             await db.drivers.updatePersonalDetails(userId, personalFields);

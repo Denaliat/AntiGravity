@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { AuthService } from '@/lib/auth';
 import { ParcelDelivery, TrackingEvent, AuditEvent } from '@/lib/types';
+import { normalizeText } from '@/lib/sanitize';
 import { randomUUID } from 'crypto';
 
 export async function POST(request: Request) {
@@ -13,7 +14,9 @@ export async function POST(request: Request) {
         if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         const body = await request.json();
-        const { recipientName, recipientAddress, parcelDescription } = body;
+        const recipientName = body.recipientName ? normalizeText(body.recipientName) : body.recipientName;
+        const recipientAddress = body.recipientAddress ? normalizeText(body.recipientAddress) : body.recipientAddress;
+        const parcelDescription = body.parcelDescription ? normalizeText(body.parcelDescription) : body.parcelDescription;
 
         // 2. Create ParcelDelivery
         const deliveryId = randomUUID();

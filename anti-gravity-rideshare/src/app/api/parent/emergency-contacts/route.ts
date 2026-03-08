@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/api-auth';
+import { normalizeText } from '@/lib/sanitize';
 
 /**
  * GET  /api/parent/emergency-contacts
@@ -69,7 +70,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { name, phone, email, relationship, isPrimary } = body;
+    const { name: rawName, phone, email: rawEmail, relationship: rawRelationship, isPrimary } = body;
+
+    // Unicode normalization — strip diacritics / combining marks
+    const name = rawName ? normalizeText(rawName) : rawName;
+    const relationship = rawRelationship ? normalizeText(rawRelationship) : rawRelationship;
+    const email = rawEmail ? normalizeText(rawEmail) : rawEmail;
 
     // Input validation
     if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -98,6 +104,15 @@ export async function POST(req: NextRequest) {
         // Return updated setup status alongside the new contact
         const contacts = await db.emergencyContacts.findByParent(parent.id);
         const setupComplete = contacts.some(c => c.isPrimary) && contacts.some(c => !c.isPrimary);
+
+        // Audit log — parent changed emergency contacts
+        await db.parentChildAudit.log({
+            action: 'CONTACTS_CHANGED',
+            actorId: parent.id,
+            parentId: parent.id,
+            targetId: contact.id,
+            metadata: { isPrimary, setupComplete },
+        });
 
         return NextResponse.json({ success: true, contact, setupComplete }, { status: 201 });
 

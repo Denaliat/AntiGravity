@@ -4,6 +4,7 @@ import { Ride } from '@/lib/types';
 import { randomUUID } from 'crypto';
 import { requireAuth } from '@/lib/api-auth';
 import { AuthService } from '@/lib/auth';
+import { normalizeText } from '@/lib/sanitize';
 
 /**
  * POST /api/parent/rides
@@ -51,7 +52,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { childId, pickup, dropoff, acknowledgedNoContacts } = body;
+    const { childId, acknowledgedNoContacts } = body;
+    const pickup = body.pickup ? normalizeText(body.pickup) : body.pickup;
+    const dropoff = body.dropoff ? normalizeText(body.dropoff) : body.dropoff;
 
     // ── 3. Input validation ────────────────────────────────────────────────────
     if (!childId) {
@@ -129,6 +132,16 @@ export async function POST(req: NextRequest) {
         };
 
         await db.rides.create(ride);
+
+        // Audit log — parent booked a ride for their child
+        await db.parentChildAudit.log({
+            action: 'RIDE_CREATED',
+            actorId: parent.id,
+            childId: childId,
+            parentId: parent.id,
+            targetId: ride.rideId,
+            metadata: { pickup, dropoff, acknowledgedNoContacts: !!acknowledgedNoContacts },
+        });
 
         return NextResponse.json({ success: true, ride }, { status: 201 });
 

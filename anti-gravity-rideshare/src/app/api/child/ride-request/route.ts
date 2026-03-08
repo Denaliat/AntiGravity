@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAuth } from '@/lib/api-auth';
 import { AuthService } from '@/lib/auth';
+import { normalizeText } from '@/lib/sanitize';
 
 /**
  * POST /api/child/ride-request
@@ -70,7 +71,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { requestedPickup, requestedDropoff } = body;
+    const requestedPickup = body.requestedPickup ? normalizeText(body.requestedPickup) : body.requestedPickup;
+    const requestedDropoff = body.requestedDropoff ? normalizeText(body.requestedDropoff) : body.requestedDropoff;
     if (!requestedPickup || typeof requestedPickup !== 'string' || requestedPickup.trim().length === 0) {
         return NextResponse.json({ error: 'requestedPickup is required' }, { status: 400 });
     }

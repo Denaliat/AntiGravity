@@ -222,7 +222,12 @@ export interface Ride {
     requestedByParentId?: string;      // Set when a parent books on behalf of a child
     driverId?: string;
     pickupLocation: string;
+    pickupCoords?: { lat: number; lng: number };
     dropoffLocation: string;
+    dropoffCoords?: { lat: number; lng: number };
+    distanceMeters?: number;
+    durationSeconds?: number;
+    estimatedFare?: number;
     status: 'REQUESTED' | 'ACCEPTED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
     fare: number;
     timestamp: string;
