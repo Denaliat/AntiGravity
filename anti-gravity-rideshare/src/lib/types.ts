@@ -89,6 +89,7 @@ export interface User {
     rideRestrictionsEnabled?: boolean;    // Parent can disable rides entirely for this child
     allowedPickupLocations?: string[];    // Optional approved pickup addresses
     parentChildEnabled?: boolean;         // Set by parent during onboarding
+    parentVerifiedAt?: string;            // ISO — set when parent verifies child's login session
     // PARENT account fields
     emergencyContacts?: EmergencyContact[];
     // Common optional fields

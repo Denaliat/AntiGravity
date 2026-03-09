@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
 /**
@@ -58,3 +58,27 @@ export async function createServerClientFromCookies() {
         },
     });
 }
+
+/**
+ * For use in the OAuth callback route ONLY.
+ *
+ * Unlike the other helpers, this one writes session cookies onto a
+ * NextResponse object so that `exchangeCodeForSession()` can persist
+ * the new tokens back to the browser.
+ */
+export function createCallbackClient(req: NextRequest, res: NextResponse) {
+    return createServerClient(supabaseUrl, supabaseAnonKey, {
+        cookies: {
+            getAll() {
+                return req.cookies.getAll();
+            },
+            setAll(cookiesToSet) {
+                cookiesToSet.forEach(({ name, value, options }) => {
+                    // Write onto the outgoing response so the browser receives them
+                    res.cookies.set(name, value, options);
+                });
+            },
+        },
+    });
+}
+

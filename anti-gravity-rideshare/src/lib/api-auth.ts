@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClientFromRequest } from './supabase-server';
 import type { User } from './types';
+import { requireMfa } from './mfa';
 
 /**
  * Admin roles that are allowed to access /api/admin/* endpoints.
@@ -87,6 +88,10 @@ export async function requireAdminAuth(
         );
     }
 
+    // Enforce MFA (AAL2) for admin roles
+    const mfaCheck = await requireMfa(authResult);
+    if (mfaCheck) return mfaCheck;
+
     return authResult;
 }
 
@@ -104,6 +109,84 @@ export async function requireLeadAdminAuth(
     if (user.role !== 'LEAD_ADMIN') {
         return NextResponse.json(
             { error: 'Forbidden — Lead Admin role required' },
+            { status: 403 }
+        );
+    }
+
+    // Enforce MFA (AAL2) for lead admin
+    const mfaCheck = await requireMfa(authResult);
+    if (mfaCheck) return mfaCheck;
+
+    return authResult;
+}
+
+/**
+ * Verifies the request carries a valid Supabase session AND that the
+ * authenticated user has the DRIVER role. Enforces AAL2 (MFA).
+ */
+export async function requireDriverAuth(
+    req: NextRequest
+): Promise<AuthResult | NextResponse> {
+    const authResult = await requireAuth(req);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { user } = authResult;
+    if (user.role !== 'DRIVER') {
+        return NextResponse.json(
+            { error: 'Forbidden — Driver role required' },
+            { status: 403 }
+        );
+    }
+
+    // Enforce MFA (AAL2) for drivers
+    const mfaCheck = await requireMfa(authResult);
+    if (mfaCheck) return mfaCheck;
+
+    return authResult;
+}
+
+/**
+ * Verifies the request carries a valid Supabase session AND that the
+ * authenticated user has the PARENT role. Enforces AAL2 (MFA).
+ */
+export async function requireParentAuth(
+    req: NextRequest
+): Promise<AuthResult | NextResponse> {
+    const authResult = await requireAuth(req);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { user } = authResult;
+    if (user.role !== 'PARENT') {
+        return NextResponse.json(
+            { error: 'Forbidden — Parent role required' },
+            { status: 403 }
+        );
+    }
+
+    // Enforce MFA (AAL2) for parents
+    const mfaCheck = await requireMfa(authResult);
+    if (mfaCheck) return mfaCheck;
+
+    return authResult;
+}
+
+/**
+ * Verifies the request carries a valid Supabase session AND that the
+ * authenticated user has the CHILD role.
+ *
+ * Children do NOT have their own MFA — instead they are authenticated
+ * by their parent after login via the parental verification gate.
+ */
+export async function requireChildAuth(
+    req: NextRequest
+): Promise<AuthResult | NextResponse> {
+    const authResult = await requireAuth(req);
+    if (authResult instanceof NextResponse) return authResult;
+
+    const { user } = authResult;
+    if (user.role !== 'CHILD') {
+        return NextResponse.json(
+            { error: 'Forbidden — Child role required' },
             { status: 403 }
         );
     }
